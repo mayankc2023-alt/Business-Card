@@ -38,11 +38,32 @@ function findDuplicateIndex(list, contact) {
   });
 }
 
-function fileToBase64(file) {
+function resizeAndEncode(file, maxDimension = 1200, quality = 0.82) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
     reader.onerror = reject;
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = reject;
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > height && width > maxDimension) {
+          height = Math.round((height * maxDimension) / width);
+          width = maxDimension;
+        } else if (height > maxDimension) {
+          width = Math.round((width * maxDimension) / height);
+          height = maxDimension;
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+        // JPEG compresses far better than PNG for photos, which keeps the request small
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.src = reader.result;
+    };
     reader.readAsDataURL(file);
   });
 }
@@ -63,7 +84,7 @@ export default function App() {
   async function handleFile(e, which) {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
-    const dataUrl = await fileToBase64(file);
+    const dataUrl = await resizeAndEncode(file);
     if (which === "front") setFrontImg(dataUrl);
     else setBackImg(dataUrl);
   }
