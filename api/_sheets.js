@@ -1,0 +1,83 @@
+import { google } from "googleapis";
+
+const REGISTRY_SHEET_ID = process.env.REGISTRY_SHEET_ID;
+const REGISTRY_TAB = "Sheet1"; // change if your registry tab has a different name
+
+function getAuth() {
+  const rawKey = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+  if (!rawKey) {
+    throw new Error("Server is missing GOOGLE_SERVICE_ACCOUNT_KEY");
+  }
+  const credentials = JSON.parse(rawKey);
+  return new google.auth.GoogleAuth({
+    credentials,
+    scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+  });
+}
+
+async function getSheetsClient() {
+  const auth = getAuth();
+  const client = await auth.getClient();
+  return google.sheets({ version: "v4", auth: client });
+}
+
+// Registry row shape (row 1 = headers):
+// code | sheet_id | expires_on | active | whatsapp_message | email_message
+export async function lookupCode(code) {
+  if (!REGISTRY_SHEET_ID) {
+    throw new Error("Server is missing REGISTRY_SHEET_ID");
+  }
+  const sheets = await getSheetsClient();
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: REGISTRY_SHEET_ID,
+    range: `${REGISTRY_TAB}!A2:F1000`,
+  });
+  const rows = res.data.values || [];
+  const match = rows.find((row) => (row[0] || "").trim().toLowerCase() === (code || "").trim().toLowerCase());
+  if (!match) return { valid: false, reason: "Code not found" };
+
+  const [rowCode, sheetId, expiresOn, active, whatsappMessage, emailMessage] = match;
+
+  const isActive = (active || "").trim().toLowerCase() === "yes" || (active || "").trim().toLowerCase() === "true";
+  if (!isActive) return { valid: false, reason: "Code is not active" };
+
+  if (expiresOn) {
+    const expiryDate = new Date(expiresOn);
+    const now = new Date();
+    if (!isNaN(expiryDate.getTime()) && now > expiryDate) {
+      return { valid: false, reason: "Code has expired" };
+    }
+  }
+
+  if (!sheetId) return { valid: false, reason: "Code has no linked sheet" };
+
+  return {
+    valid: true,
+    code: rowCode,
+    sheetId: sheetId.trim(),
+    whatsappMessage: whatsappMessage || "",
+    emailMessage: emailMessage || "",
+  };
+}
+
+export async function appendContactRow(targetSheetId, contact) {
+  const sheets = await getSheetsClient();
+  const timestamp = new Date().toISOString();
+  const row = [
+    timestamp,
+    contact.name || "",
+    contact.company || "",
+    contact.title || "",
+    contact.phone || "",
+    contact.email || "",
+    contact.address || "",
+    contact.website || "",
+  ];
+  await sheets.spreadsheets.values.append({
+    spreadsheetId: targetSheetId,
+    range: "Sheet1!A1",
+    valueInputOption: "USER_ENTERED",
+    insertDataOption: "INSERT_ROWS",
+    requestBody: { values: [row] },
+  });
+}

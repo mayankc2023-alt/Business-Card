@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/extract-card.js": {
+      "maxDuration": 30
+    }
+  }
+}
