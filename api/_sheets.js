@@ -58,5 +58,58 @@ export async function lookupCode(code) {
     }
   }
 
-  if (!sheetId) return { valid: false, reason: "Code has no linked sheet"
+  if (!sheetId) return { valid: false, reason: "Code has no linked sheet" };
+
+  return {
+    valid: true,
+    code: rowCode,
+    sheetId: sheetId.trim(),
+    whatsappMessage: whatsappMessage || "",
+    emailMessage: emailMessage || "",
+  };
+}
+
+export async function appendContactRow(targetSheetId, contact) {
+  const sheets = await getSheetsClient();
+  const timestamp = new Date().toISOString();
+  // Prefixing with an apostrophe forces Sheets to treat the value as plain
+  // text instead of trying to parse it as a formula/number -- this matters
+  // for phone numbers starting with "+" or containing long digit strings.
+  const asText = (val) => (val ? `'${val}` : "");
+
+  // Column order must match your sheet's header row exactly:
+  // Timestamp | Name | Company | Title | Phone | Email | Address 1 | Address 2 | Website | Comments
+  const row = [
+    timestamp,
+    contact.name || "",
+    contact.company || "",
+    contact.title || "",
+    asText(contact.phone),
+    contact.email || "",
+    contact.address_1 || "",
+    contact.address_2 || "",
+    contact.website || "",
+    "", // Comments -- blank when the row is first created
+  ];
+
+  const targetTab = await getSheetTabName(sheets, targetSheetId);
+
+  const appendResponse = await sheets.spreadsheets.values.append({
+    spreadsheetId: targetSheetId,
+    range: `${targetTab}!A1`,
+    valueInputOption: "USER_ENTERED",
+    insertDataOption: "INSERT_ROWS",
+    requestBody: { values: [row] },
+  });
+
+  // Extract the row number from something like "Arvind - Scan!A5:J5"
+  // so the frontend can later save a comment to this exact row.
+  const updatedRange = appendResponse.data.updates && appendResponse.data.updates.updatedRange;
+  let rowNumber = null;
+  if (updatedRange) {
+    const match = updatedRange.match(/(\d+)(?::[A-Z]+\d+)?$/);
+    if (match) rowNumber = parseInt(match[1], 10);
+  }
+
+  return rowNumber;
 }
