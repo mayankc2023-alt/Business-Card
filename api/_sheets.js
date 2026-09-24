@@ -21,6 +21,15 @@ async function getSheetsClient() {
   return google.sheets({ version: "v4", auth: client });
 }
 
+// Different people's sheets may use different tab names (e.g. "Arvind - Scan"),
+// so we look up the first tab in the spreadsheet rather than assuming "Sheet1".
+// Exported so update-comment.js can reuse the exact same logic.
+export async function getSheetTabName(sheets, targetSheetId) {
+  const meta = await sheets.spreadsheets.get({ spreadsheetId: targetSheetId });
+  const firstTabName = meta.data.sheets && meta.data.sheets[0] && meta.data.sheets[0].properties.title;
+  return firstTabName || "Sheet1";
+}
+
 // Registry row shape (row 1 = headers):
 // code | sheet_id | expires_on | active | whatsapp_message | email_message
 export async function lookupCode(code) {
@@ -49,45 +58,4 @@ export async function lookupCode(code) {
     }
   }
 
-  if (!sheetId) return { valid: false, reason: "Code has no linked sheet" };
-
-  return {
-    valid: true,
-    code: rowCode,
-    sheetId: sheetId.trim(),
-    whatsappMessage: whatsappMessage || "",
-    emailMessage: emailMessage || "",
-  };
-}
-
-export async function appendContactRow(targetSheetId, contact) {
-  const sheets = await getSheetsClient();
-  const timestamp = new Date().toISOString();
-  // Prefixing with an apostrophe forces Sheets to treat the value as plain
-  // text instead of trying to parse it as a formula/number -- this matters
-  // for phone numbers starting with "+" or containing long digit strings.
-  const asText = (val) => (val ? `'${val}` : "");
-  const row = [
-    timestamp,
-    contact.name || "",
-    contact.company || "",
-    contact.title || "",
-    asText(contact.phone),
-    contact.email || "",
-    contact.address || "",
-    contact.website || "",
-  ];
-  // Different people's sheets may use different tab names (e.g. "Arvind - Scan"),
-  // so we look up the first tab in the spreadsheet rather than assuming "Sheet1".
-  const meta = await sheets.spreadsheets.get({ spreadsheetId: targetSheetId });
-  const firstTabName = meta.data.sheets && meta.data.sheets[0] && meta.data.sheets[0].properties.title;
-  const targetTab = firstTabName || "Sheet1";
-
-  await sheets.spreadsheets.values.append({
-    spreadsheetId: targetSheetId,
-    range: `${targetTab}!A1`,
-    valueInputOption: "USER_ENTERED",
-    insertDataOption: "INSERT_ROWS",
-    requestBody: { values: [row] },
-  });
-}
+  if (!sheetId) return { valid: false, reason: "Code has no linked sheet"
