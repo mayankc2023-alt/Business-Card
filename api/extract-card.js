@@ -49,12 +49,17 @@ export default async function handler(req, res) {
       text:
         "You are reading a business card photo (front, and possibly back). " +
         "Extract these fields as strict JSON with exactly these keys: " +
-        "name, company, title, phone, email, address, website. " +
+        "name, company, title, phone, email, address_1, address_2, website. " +
         "If a field is not present, use an empty string for it. " +
         "Combine information from both images if two are given. " +
         "IMPORTANT for phone: if the card lists multiple phone numbers " +
         "(e.g. office and mobile), return ONLY the first one listed, as a " +
         "single clean number. Never combine multiple numbers into one string. " +
+        "IMPORTANT for address: if the card shows two separate addresses " +
+        "(e.g. a factory address and a registered office address), put the " +
+        "primary or first-listed address in address_1 and the second one in " +
+        "address_2. If there is only one address, put it in address_1 and " +
+        "leave address_2 as an empty string. " +
         "Respond with ONLY the JSON object, no markdown fences, no commentary.",
     },
     { type: "image", source: { type: "base64", media_type: frontParsed.mediaType, data: frontParsed.data } },
@@ -98,25 +103,4 @@ export default async function handler(req, res) {
       return res.status(502).json({ error: "Could not parse extracted fields from the card" });
     }
 
-    const fields = ["name", "company", "title", "phone", "email", "address", "website"];
-    result = {};
-    fields.forEach((key) => {
-      result[key] = typeof parsed[key] === "string" ? parsed[key] : "";
-    });
-  } catch (err) {
-    return res.status(500).json({ error: err.message || "Unexpected error reading the card" });
-  }
-
-  // Write live to the person's own sheet. If this fails, we still return
-  // the extracted data so they don't lose the scan -- but we flag it so
-  // the frontend can warn them it wasn't saved to the sheet.
-  try {
-    await appendContactRow(codeInfo.sheetId, result);
-    result._savedToSheet = true;
-  } catch (err) {
-    result._savedToSheet = false;
-    result._saveError = err.message || "Could not save to sheet";
-  }
-
-  return res.status(200).json(result);
-}
+    const fields = ["name", "company", "title", "phone", "email",
