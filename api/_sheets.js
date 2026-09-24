@@ -59,3 +59,4 @@ export async function lookupCode(code) {
   }
 
   if (!sheetId) return { valid: false, reason: "Code has no linked sheet"
+}
