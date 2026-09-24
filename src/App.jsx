@@ -6,7 +6,8 @@ const FIELDS = [
   { key: "title", label: "Designation" },
   { key: "phone", label: "Phone" },
   { key: "email", label: "Email" },
-  { key: "address", label: "Address" },
+  { key: "address_1", label: "Address 1" },
+  { key: "address_2", label: "Address 2" },
   { key: "website", label: "Website" },
 ];
 
@@ -77,6 +78,7 @@ export default function App() {
   const [duplicateNotice, setDuplicateNotice] = useState(null);
   const [waQueue, setWaQueue] = useState(null);
   const [emailQueue, setEmailQueue] = useState(null);
+  const [commentStatus, setCommentStatus] = useState({}); // { [contactId]: "saving" | "saved" | "error" }
   const frontInputRef = useRef(null);
   const backInputRef = useRef(null);
 
@@ -145,7 +147,9 @@ export default function App() {
       if (extracted._savedToSheet === false) {
         setErrorMsg("Card was read, but could not be saved to the sheet: " + (extracted._saveError || "unknown error"));
       }
-      const newContact = { ...extracted, id: Date.now() };
+      // extracted already carries _rowNumber and _sheetId from the backend
+      // (when the sheet write succeeded) -- these are needed to save comments later.
+      const newContact = { ...extracted, comment: "", id: Date.now() };
 
       setContacts((prev) => {
         const dupIdx = findDuplicateIndex(prev, newContact);
@@ -165,6 +169,44 @@ export default function App() {
 
   function updateField(idx, key, value) {
     setContacts((prev) => prev.map((c, i) => (i === idx ? { ...c, [key]: value } : c)));
+    if (key === "comment") {
+      const contact = contacts[idx];
+      if (contact) {
+        setCommentStatus((prev) => {
+          const next = { ...prev };
+          delete next[contact.id];
+          return next;
+        });
+      }
+    }
+  }
+
+  async function saveComment(contactId) {
+    const contact = contacts.find((c) => c.id === contactId);
+    if (!contact) return;
+    if (!contact._sheetId || !contact._rowNumber) {
+      setCommentStatus((prev) => ({ ...prev, [contactId]: "error" }));
+      return;
+    }
+    setCommentStatus((prev) => ({ ...prev, [contactId]: "saving" }));
+    try {
+      const res = await fetch("/api/update-comment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sheetId: contact._sheetId,
+          rowNumber: contact._rowNumber,
+          comment: contact.comment || "",
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || "Could not save comment");
+      }
+      setCommentStatus((prev) => ({ ...prev, [contactId]: "saved" }));
+    } catch (err) {
+      setCommentStatus((prev) => ({ ...prev, [contactId]: "error" }));
+    }
   }
 
   function removeContact(idx) {
@@ -210,9 +252,10 @@ export default function App() {
   }
 
   function exportCSV() {
-    const headers = [...FIELDS.map((f) => f.label), "WhatsApp link", "Email draft link"];
+    const headers = [...FIELDS.map((f) => f.label), "Comments", "WhatsApp link", "Email draft link"];
     const rows = contacts.map((c) => [
       ...FIELDS.map((f) => (c[f.key] || "").replace(/"/g, '""')),
+      (c.comment || "").replace(/"/g, '""'),
       waLink(c, messages.whatsappMessage) || "",
       mailtoLink(c, messages.emailMessage) || "",
     ]);
@@ -261,6 +304,18 @@ export default function App() {
       width: 100%;
     }
     .ecs-input:focus { outline: none; border-bottom: 1px solid #3D5A80; }
+    .ecs-textarea {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12.5px;
+      border: 1px solid #D3D1C7;
+      border-radius: 6px;
+      background: #fff;
+      color: #1C2128;
+      padding: 8px;
+      width: 100%;
+      resize: vertical;
+    }
+    .ecs-textarea:focus { outline: none; border-color: #3D5A80; }
     .ecs-tile {
       border: 1.5px dashed #B4B2A9;
       border-radius: 8px;
@@ -507,6 +562,8 @@ export default function App() {
             const isEditing = editingIndex === idx;
             const link = waLink(c, messages.whatsappMessage);
             const mail = mailtoLink(c, messages.emailMessage);
+            const cStatus = commentStatus[c.id];
+            const canSyncComment = Boolean(c._sheetId && c._rowNumber);
             return (
               <div key={c.id || idx} style={{ background: "#fff", border: "1px solid #D3D1C7", borderRadius: 8, padding: "12px 16px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
@@ -537,6 +594,51 @@ export default function App() {
                     </button>
                   </div>
                 </div>
+
+                <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #F1EFE8" }}>
+                  <div className="ecs-sans" style={{ fontSize: 10, color: "#888780", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
+                    Comments
+                  </div>
+                  <textarea
+                    className="ecs-textarea"
+                    rows={2}
+                    maxLength={400}
+                    placeholder="Add a note about this contact..."
+                    value={c.comment || ""}
+                    onChange={(e) => updateField(idx, "comment", e.target.value)}
+                  />
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
+                    <span className="ecs-sans" style={{ fontSize: 11, color: "#888780" }}>
+                      {(c.comment || "").length}/400
+                    </span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      {cStatus === "saved" && (
+                        <span className="ecs-sans" style={{ fontSize: 11, color: "#2E7D32" }}>
+                          Saved
+                        </span>
+                      )}
+                      {cStatus === "error" && (
+                        <span className="ecs-sans" style={{ fontSize: 11, color: "#A32D2D" }}>
+                          Could not save
+                        </span>
+                      )}
+                      <button
+                        className="ecs-btn"
+                        style={{ padding: "5px 10px", fontSize: 12 }}
+                        disabled={cStatus === "saving" || !canSyncComment}
+                        onClick={() => saveComment(c.id)}
+                      >
+                        {cStatus === "saving" ? "Saving..." : "Save comment"}
+                      </button>
+                    </div>
+                  </div>
+                  {!canSyncComment && (
+                    <div className="ecs-sans" style={{ fontSize: 11, color: "#854F0B", marginTop: 4 }}>
+                      This card wasn't saved to the sheet, so comments can't sync.
+                    </div>
+                  )}
+                </div>
+
                 <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #F1EFE8", display: "flex", gap: 20, flexWrap: "wrap" }}>
                   {link ? (
                     <a href={link} target="_blank" rel="noopener noreferrer" className="ecs-sans" style={{ fontSize: 12, color: "#3D5A80", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6 }}>
