@@ -103,4 +103,27 @@ export default async function handler(req, res) {
       return res.status(502).json({ error: "Could not parse extracted fields from the card" });
     }
 
-    const fields = ["name", "company", "title", "phone", "email",
+    const fields = ["name", "company", "title", "phone", "email", "address_1", "address_2", "website"];
+    result = {};
+    fields.forEach((key) => {
+      result[key] = typeof parsed[key] === "string" ? parsed[key] : "";
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message || "Unexpected error reading the card" });
+  }
+
+  // Write live to the person's own sheet. If this fails, we still return
+  // the extracted data so they don't lose the scan -- but we flag it so
+  // the frontend can warn them it wasn't saved to the sheet.
+  try {
+    const rowNumber = await appendContactRow(codeInfo.sheetId, result);
+    result._savedToSheet = true;
+    result._rowNumber = rowNumber;
+    result._sheetId = codeInfo.sheetId;
+  } catch (err) {
+    result._savedToSheet = false;
+    result._saveError = err.message || "Could not save to sheet";
+  }
+
+  return res.status(200).json(result);
+}
